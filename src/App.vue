@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 
 const wsUrl = "ws://localhost:53241/ws";
 // const apiUrl = "http://223.194.20.119:53241";
@@ -100,12 +100,11 @@ const connectWebSocket = () => {
         document.body.removeChild(a);
 
         // 상태 초기화
+        const filename = currentFileMetadata.value.filename;
         fileChunks.value = [];
         currentFileMetadata.value = null;
         isDownloading.value = false;
-        messages.value.push(
-          `다운로드 완료: ${currentFileMetadata.value?.filename}`
-        );
+        messages.value.push(`다운로드 완료: ${filename}`);
       }
 
       // 에러 처리
