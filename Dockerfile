@@ -2,11 +2,10 @@ FROM node:22-alpine as build
 
 WORKDIR /app
 
-COPY ./jamovi/package*.json ./
-COPY ./jamovi/.env ./
+COPY ./package*.json ./
 RUN npm install
 
-COPY ./jamovi/ .
+COPY . .
 
 RUN npm run build
 
