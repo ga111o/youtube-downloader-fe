@@ -2,8 +2,8 @@
 import { ref, reactive, watch } from "vue";
 import axios from "axios";
 
-const apiUrl = "http://localhost:53241";
-// const apiUrl = "http://223.194.20.119:53241";
+// const apiUrl = "http://localhost:53241";
+const apiUrl = "http://223.194.20.119:53241";
 
 // 다운로드 요청 상태 - 단일 URL 대신 여러 URL 관리
 const newUrl = ref("");
