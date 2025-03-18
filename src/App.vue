@@ -2,21 +2,27 @@
 import { ref, reactive, watch } from "vue";
 import axios from "axios";
 
-// const apiUrl = "http://localhost:8000";
-const apiUrl = "http://223.194.20.119:53241";
+const apiUrl = "http://localhost:53241";
+// const apiUrl = "http://223.194.20.119:53241";
 
-// 다운로드 요청 상태
-const youtubeUrl = ref("");
+// 다운로드 요청 상태 - 단일 URL 대신 여러 URL 관리
+const newUrl = ref("");
 const format = ref("mp3");
 const formats = ["mp3", "mp4"];
 const isLoading = ref(false);
 const error = ref("");
-const downloadState = reactive({
-  downloadId: "",
-  status: "",
-  message: "",
-  isReady: false,
-});
+
+// URL 입력이 완료되면 자동으로 큐에 추가하는 함수
+const handleUrlInput = (event: Event) => {
+  // Enter 키를 누르거나 붙여넣기 후 포커스가 떠날 때 실행
+  if (
+    newUrl.value &&
+    ((event instanceof KeyboardEvent && event.key === "Enter") ||
+      event.type === "blur")
+  ) {
+    addToDownloadQueue();
+  }
+};
 
 // 유튭 비디오 정보 상태
 const videoInfo = reactive({
@@ -26,67 +32,127 @@ const videoInfo = reactive({
   error: "",
 });
 
-const downloadYouTube = async () => {
-  if (!youtubeUrl.value) {
+// 기존 상태 객체들을 제거하고 큐 기반 처리로 변경
+const downloadQueue = reactive<
+  {
+    url: string;
+    format: string;
+    id?: string;
+    status: string;
+    message: string;
+    isReady: boolean;
+    title: string;
+    thumbnail: string;
+    error?: string;
+  }[]
+>([]);
+
+const addToDownloadQueue = async () => {
+  if (!newUrl.value) {
     error.value = "YouTube URL을 입력해주세요";
     return;
   }
 
   try {
-    isLoading.value = true;
     error.value = "";
 
-    const response = await axios.post(`${apiUrl}/download`, {
-      url: youtubeUrl.value,
+    // 비디오 정보 가져오기
+    const videoId = extractVideoId(newUrl.value);
+    if (!videoId) {
+      error.value = "유효한 YouTube URL이 아닙니다";
+      return;
+    }
+
+    const thumbnail = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
+
+    // 큐에 추가
+    downloadQueue.push({
+      url: newUrl.value,
       format: format.value,
+      status: "pending",
+      message: "대기 중",
+      isReady: false,
+      title: `Video ID: ${videoId}`,
+      thumbnail: thumbnail,
     });
 
-    downloadState.downloadId = response.data.download_id;
-    downloadState.status = response.data.status;
-    downloadState.message = response.data.message;
-    downloadState.isReady = false;
-
-    checkDownloadStatus();
+    // 입력창 초기화
+    newUrl.value = "";
   } catch (err: any) {
-    error.value = `다운로드 요청 오류: ${
-      err.response?.data?.detail || err.message
-    }`;
-  } finally {
-    isLoading.value = false;
+    error.value = `URL 추가 오류: ${err.message}`;
   }
 };
 
-const checkDownloadStatus = async () => {
-  if (!downloadState.downloadId) return;
+const startDownload = async (index: number) => {
+  const item = downloadQueue[index];
+  if (item.status === "processing" || item.status === "completed") return;
 
   try {
-    const response = await axios.get(
-      `${apiUrl}/status/${downloadState.downloadId}`
-    );
-    downloadState.status = response.data.status;
-    downloadState.message = response.data.message;
+    item.status = "processing";
+    item.message = "처리 중...";
 
-    if (response.data.status === "completed") {
-      downloadState.isReady = true;
-    } else if (response.data.status === "processing") {
-      // 아직 처리 중이면 3초 후 다시 확인
-      setTimeout(checkDownloadStatus, 1000);
-    }
+    const response = await axios.post(`${apiUrl}/download`, {
+      url: item.url,
+      format: item.format,
+    });
+
+    item.id = response.data.download_id;
+    item.status = response.data.status;
+    item.message = response.data.message;
+
+    // 상태 확인 시작
+    checkItemStatus(index);
   } catch (err: any) {
-    error.value = `상태 확인 오류: ${
+    item.status = "error";
+    item.error = `다운로드 요청 오류: ${
       err.response?.data?.detail || err.message
     }`;
+    item.message = "오류 발생";
   }
 };
 
-const downloadFile = () => {
-  if (!downloadState.downloadId || !downloadState.isReady) return;
+const startAllDownloads = () => {
+  downloadQueue.forEach((item, index) => {
+    if (item.status === "pending") {
+      startDownload(index);
+    }
+  });
+};
 
-  window.location.href = `${apiUrl}/download/${downloadState.downloadId}`;
+const checkItemStatus = async (index: number) => {
+  const item = downloadQueue[index];
+  if (!item || !item.id) return;
+
+  try {
+    const response = await axios.get(`${apiUrl}/status/${item.id}`);
+    item.status = response.data.status;
+    item.message = response.data.message;
+
+    if (response.data.status === "completed") {
+      item.isReady = true;
+    } else if (response.data.status === "processing") {
+      // 아직 처리 중이면 1초 후 다시 확인
+      setTimeout(() => checkItemStatus(index), 1000);
+    }
+  } catch (err: any) {
+    item.status = "error";
+    item.error = `상태 확인 오류: ${err.response?.data?.detail || err.message}`;
+  }
+};
+
+const downloadFile = (index: number) => {
+  const item = downloadQueue[index];
+  if (!item || !item.id || !item.isReady) return;
+
+  window.location.href = `${apiUrl}/download/${item.id}`;
+};
+
+const removeFromQueue = (index: number) => {
+  downloadQueue.splice(index, 1);
 };
 
 const fetchVideoInfo = async () => {
-  if (!youtubeUrl.value) {
+  if (!newUrl.value) {
     videoInfo.title = "";
     videoInfo.thumbnail = "";
     return;
@@ -96,10 +162,10 @@ const fetchVideoInfo = async () => {
     videoInfo.isLoading = true;
     videoInfo.error = "";
 
-    const videoId = extractVideoId(youtubeUrl.value);
+    const videoId = extractVideoId(newUrl.value);
 
     if (!videoId) {
-      videoInfo.error = "!videoId" + youtubeUrl.value;
+      videoInfo.error = "!videoId" + newUrl.value;
       videoInfo.title = "";
       videoInfo.thumbnail = "";
       return;
@@ -133,7 +199,7 @@ const extractVideoId = (url: string): string | null => {
   return match && match[7].length === 11 ? match[7] : null;
 };
 
-watch(youtubeUrl, (newUrl) => {
+watch(newUrl, (newUrl) => {
   if (newUrl) {
     fetchVideoInfo();
   } else {
@@ -149,9 +215,11 @@ watch(youtubeUrl, (newUrl) => {
       <div class="input-group">
         <input
           type="text"
-          v-model="youtubeUrl"
+          v-model="newUrl"
           placeholder="YouTube URL을 입력하세요"
           :disabled="isLoading"
+          @keyup.enter="handleUrlInput"
+          @blur="handleUrlInput"
         />
 
         <select v-model="format" :disabled="isLoading">
@@ -159,46 +227,61 @@ watch(youtubeUrl, (newUrl) => {
             {{ fmt }}
           </option>
         </select>
-
-        <button @click="downloadYouTube" :disabled="isLoading || !youtubeUrl">
-          {{ isLoading ? "처리중..." : "다운로드" }}
-        </button>
-      </div>
-
-      <!-- 비디오 정보 표시 영역 -->
-      <div v-if="videoInfo.isLoading" class="video-info-loading">
-        비디오 정보를 불러오는 중...
-      </div>
-      <div
-        v-else-if="videoInfo.title && videoInfo.thumbnail"
-        class="video-info"
-      >
-        <img
-          :src="videoInfo.thumbnail"
-          alt="비디오 썸네일"
-          class="video-thumbnail"
-        />
-        <h3 class="video-title">{{ videoInfo.title }}</h3>
-      </div>
-      <div v-if="videoInfo.error" class="error-message">
-        {{ videoInfo.error }}
       </div>
 
       <div v-if="error" class="error-message">{{ error }}</div>
-    </div>
 
-    <div v-if="downloadState.downloadId" class="download-status">
-      <h3>다운로드 상태</h3>
-      <p><strong>상태:</strong> {{ downloadState.status }}</p>
-      <p><strong>메시지:</strong> {{ downloadState.message }}</p>
+      <!-- 다운로드 목록 -->
+      <div v-if="downloadQueue.length > 0" class="download-queue">
+        <div class="queue-header">
+          <h3>다운로드 대기열 ({{ downloadQueue.length }}개)</h3>
+          <button
+            @click="startAllDownloads"
+            class="start-all-button"
+            v-if="downloadQueue.some((item) => item.status === 'pending')"
+          >
+            모두 다운로드 시작
+          </button>
+        </div>
 
-      <button
-        v-if="downloadState.isReady"
-        @click="downloadFile"
-        class="download-button"
-      >
-        파일 다운로드
-      </button>
+        <div
+          v-for="(item, index) in downloadQueue"
+          :key="index"
+          class="queue-item"
+        >
+          <div class="item-info">
+            <img :src="item.thumbnail" alt="썸네일" class="item-thumbnail" />
+            <div class="item-details">
+              <h4>{{ item.title }}</h4>
+              <p class="item-format">형식: {{ item.format }}</p>
+              <p class="item-status">
+                상태: {{ item.status }} - {{ item.message }}
+              </p>
+              <p v-if="item.error" class="error-message">{{ item.error }}</p>
+            </div>
+          </div>
+
+          <div class="item-actions">
+            <button
+              v-if="item.status === 'pending'"
+              @click="startDownload(index)"
+              class="start-button"
+            >
+              시작
+            </button>
+            <button
+              v-if="item.isReady"
+              @click="downloadFile(index)"
+              class="download-button"
+            >
+              다운로드
+            </button>
+            <button @click="removeFromQueue(index)" class="remove-button">
+              삭제
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -237,56 +320,97 @@ input {
   margin-top: 0.5rem;
 }
 
-.download-status {
+.download-queue {
   margin-top: 2rem;
-  padding: 1rem;
   border: 1px solid #ddd;
   border-radius: 4px;
   background-color: #f9f9f9;
-  text-align: left;
 }
 
-.download-button {
+.queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.start-all-button {
   background-color: #42b883;
   color: white;
   border: none;
   padding: 0.5rem 1rem;
   border-radius: 4px;
   cursor: pointer;
-  margin-top: 1rem;
 }
 
-.download-button:hover {
-  background-color: #3a9d74;
-}
-
-.video-info {
-  margin: 1rem 0;
-  padding: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background-color: #f9f9f9;
+.queue-item {
   display: flex;
-  flex-direction: column;
+  justify-content: space-between;
   align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid #ddd;
 }
 
-.video-thumbnail {
-  max-width: 100%;
-  height: auto;
+.queue-item:last-child {
+  border-bottom: none;
+}
+
+.item-info {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  flex: 1;
+}
+
+.item-thumbnail {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
   border-radius: 4px;
-  margin-bottom: 1rem;
+  margin-right: 1rem;
 }
 
-.video-title {
-  margin: 0;
-  font-size: 1.2rem;
-  text-align: center;
+.item-details {
+  flex: 1;
 }
 
-.video-info-loading {
-  margin: 1rem 0;
-  font-style: italic;
-  color: #666;
+.item-details h4 {
+  margin: 0 0 0.5rem 0;
+}
+
+.item-format,
+.item-status {
+  margin: 0.2rem 0;
+  font-size: 0.9rem;
+}
+
+.item-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.start-button,
+.download-button,
+.remove-button {
+  padding: 0.3rem 0.8rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.start-button {
+  background-color: #4299e1;
+  color: white;
+}
+
+.download-button {
+  background-color: #42b883;
+  color: white;
+}
+
+.remove-button {
+  background-color: #e53e3e;
+  color: white;
 }
 </style>
