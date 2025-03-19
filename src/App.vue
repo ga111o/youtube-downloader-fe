@@ -3,8 +3,8 @@ import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 // import downloadIcon from "../public/download.svg"; // SVG 파일 임포트
 // import deleteIcon from "../public/delete.svg"; // SVG 파일 임포트
 
-const wsUrl = "ws://localhost:53241/ws";
-// const apiUrl = "http://223.194.20.119:53241";
+// const wsUrl = "ws://localhost:53241/ws";
+const wsUrl = "ws://223.194.20.119:53241/ws";
 
 // WebSocket connection
 const socket = ref<WebSocket | null>(null);
