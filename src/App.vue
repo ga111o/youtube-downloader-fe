@@ -3,8 +3,22 @@ import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 // import downloadIcon from "../public/download.svg"; // SVG 파일 임포트
 // import deleteIcon from "../public/delete.svg"; // SVG 파일 임포트
 
-// const wsUrl = "ws://localhost:53241/ws";
-const wsUrl = "ws://223.194.20.119:53241/ws";
+// 두 개의 서버 URL 정의
+const LOCAL_SERVER_URL = "ws://localhost:53241/ws";
+const REMOTE_SERVER_URL = "ws://223.194.20.119:53241/ws";
+const serverType = ref<"local" | "remote">("remote"); // 기본값은 원격 서버
+const wsUrl = ref(REMOTE_SERVER_URL); // 기본 URL 설정
+
+// 서버 타입이 변경될 때 WebSocket URL 업데이트
+watch(serverType, (newType) => {
+  wsUrl.value = newType === "local" ? LOCAL_SERVER_URL : REMOTE_SERVER_URL;
+
+  // 이미 연결되어 있다면 재연결
+  if (socket.value) {
+    socket.value.close();
+    connectWebSocket();
+  }
+});
 
 // WebSocket connection
 const socket = ref<WebSocket | null>(null);
@@ -44,7 +58,7 @@ watch(
 
 // Connect to WebSocket
 const connectWebSocket = () => {
-  socket.value = new WebSocket(`${wsUrl}`);
+  socket.value = new WebSocket(`${wsUrl.value}`);
 
   socket.value.onopen = () => {
     console.log("WebSocket connected");
@@ -426,6 +440,28 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="container">
+    <!-- 서버 선택 UI 추가 -->
+    <div class="download-mode-selector">
+      <label class="mode-label">
+        <input
+          type="radio"
+          v-model="serverType"
+          value="local"
+          name="serverType"
+        />
+        <span>로컬 서버</span>
+      </label>
+      <label class="mode-label">
+        <input
+          type="radio"
+          v-model="serverType"
+          value="remote"
+          name="serverType"
+        />
+        <span>원격 서버</span>
+      </label>
+    </div>
+
     <div class="download-mode-selector">
       <label class="mode-label">
         <input
