@@ -12,6 +12,7 @@ const messages = ref<string[]>([]);
 const messagesContainer = ref<HTMLElement | null>(null);
 const newUrl = ref("");
 const selectedFormat = ref("mp3");
+const downloadMode = ref("single"); // 'single' 또는 'playlist' - 기본값은 '단일 영상' 모드
 // URL 리스트 관리를 위한 상태 추가 - 썸네일과 제목 정보 추가
 const urlList = ref<
   { url: string; selected: boolean; title: string; thumbnail: string }[]
@@ -25,6 +26,8 @@ const currentFileMetadata = ref<{
 } | null>(null);
 const isDownloading = ref(false);
 const isProcessingQueue = ref(false);
+const isShowingPlaylistModal = ref(false);
+const pendingUrl = ref("");
 
 watch(
   messages,
@@ -177,28 +180,60 @@ const connectWebSocket = () => {
 // URL 추가
 const addUrl = async () => {
   if (newUrl.value.trim()) {
+    const url = newUrl.value.trim();
+
+    // 비디오 ID와 재생목록 ID가 모두 포함된 URL인지 확인
+    if (url.includes("watch?v=") && url.includes("&list=")) {
+      // 선택된 다운로드 모드에 따라 처리
+      if (downloadMode.value === "playlist") {
+        // 재생목록 전체 다운로드
+        if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+          const message = {
+            url: url,
+            format: selectedFormat.value,
+            type: "playlist",
+          };
+          socket.value.send(JSON.stringify(message));
+          messages.value.push(`플레이리스트 처리 요청: ${url}`);
+          newUrl.value = "";
+        }
+      } else {
+        // 단일 비디오만 다운로드 - 플레이리스트 파라미터 제거
+        const videoUrl = url.split("&list=")[0];
+        const videoInfo = await getVideoInfo(videoUrl);
+        urlList.value.push({
+          url: videoUrl,
+          selected: true,
+          title: videoInfo.title || "제목 없음",
+          thumbnail: videoInfo.thumbnail || "",
+        });
+        newUrl.value = "";
+      }
+      return;
+    }
+
     // 플레이리스트 URL인지 확인 (일반적인 YouTube 플레이리스트 URL 패턴)
     if (
-      newUrl.value.includes("playlist?list=") ||
-      newUrl.value.includes("&list=") ||
-      newUrl.value.includes("/sets/")
+      url.includes("playlist?list=") ||
+      url.includes("&list=") ||
+      url.includes("/sets/")
     ) {
       // 플레이리스트 처리 요청 전송
       if (socket.value && socket.value.readyState === WebSocket.OPEN) {
         const message = {
-          url: newUrl.value.trim(),
+          url: url,
           format: selectedFormat.value,
           type: "playlist",
         };
         socket.value.send(JSON.stringify(message));
-        messages.value.push(`플레이리스트 처리 요청: ${newUrl.value}`);
+        messages.value.push(`플레이리스트 처리 요청: ${url}`);
         newUrl.value = "";
       }
     } else {
       // 일반 URL 추가 - 썸네일과 제목 가져오기
-      const videoInfo = await getVideoInfo(newUrl.value.trim());
+      const videoInfo = await getVideoInfo(url);
       urlList.value.push({
-        url: newUrl.value.trim(),
+        url: url,
         selected: true,
         title: videoInfo.title || "제목 없음",
         thumbnail: videoInfo.thumbnail || "",
@@ -344,6 +379,38 @@ const removeSingleItem = (index: number) => {
   }
 };
 
+// 비디오 또는 재생목록 선택 처리
+const handlePlaylistChoice = async (choosePlaylist: boolean) => {
+  if (!pendingUrl.value) return;
+
+  if (choosePlaylist) {
+    // 재생목록 전체 다운로드
+    if (socket.value && socket.value.readyState === WebSocket.OPEN) {
+      const message = {
+        url: pendingUrl.value,
+        format: selectedFormat.value,
+        type: "playlist",
+      };
+      socket.value.send(JSON.stringify(message));
+      messages.value.push(`플레이리스트 처리 요청: ${pendingUrl.value}`);
+    }
+  } else {
+    // 단일 비디오만 다운로드 - 플레이리스트 파라미터 제거
+    const videoUrl = pendingUrl.value.split("&list=")[0];
+    const videoInfo = await getVideoInfo(videoUrl);
+    urlList.value.push({
+      url: videoUrl,
+      selected: true,
+      title: videoInfo.title || "제목 없음",
+      thumbnail: videoInfo.thumbnail || "",
+    });
+  }
+
+  // 상태 초기화
+  isShowingPlaylistModal.value = false;
+  pendingUrl.value = "";
+};
+
 // Connect when component is mounted
 onMounted(() => {
   connectWebSocket();
@@ -359,6 +426,27 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="container">
+    <div class="download-mode-selector">
+      <label class="mode-label">
+        <input
+          type="radio"
+          v-model="downloadMode"
+          value="single"
+          name="downloadMode"
+        />
+        <span>단일 영상</span>
+      </label>
+      <label class="mode-label">
+        <input
+          type="radio"
+          v-model="downloadMode"
+          value="playlist"
+          name="downloadMode"
+        />
+        <span>재생목록</span>
+      </label>
+    </div>
+
     <div class="url-input">
       <input
         v-model="newUrl"
@@ -490,6 +578,34 @@ onBeforeUnmount(() => {
             </svg>
           </button>
         </div>
+      </div>
+    </div>
+
+    <!-- 재생목록/단일 비디오 선택 모달 -->
+    <div v-if="isShowingPlaylistModal" class="modal-overlay">
+      <div class="modal-content">
+        <h3>다운로드 옵션</h3>
+        <p>이 URL은 비디오와 재생목록을 모두 포함하고 있습니다.</p>
+        <div class="modal-buttons">
+          <button @click="handlePlaylistChoice(false)" class="modal-button">
+            단일 비디오만 다운로드
+          </button>
+          <button
+            @click="handlePlaylistChoice(true)"
+            class="modal-button playlist-button"
+          >
+            재생목록 전체 다운로드
+          </button>
+        </div>
+        <button
+          @click="
+            isShowingPlaylistModal = false;
+            pendingUrl = '';
+          "
+          class="cancel-button"
+        >
+          취소
+        </button>
       </div>
     </div>
   </div>
@@ -694,5 +810,105 @@ button:hover {
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background-color: white;
+  padding: 20px;
+  border-radius: 8px;
+  max-width: 90%;
+  width: 350px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.modal-content h3 {
+  margin-top: 0;
+  text-align: center;
+}
+
+.modal-content p {
+  margin-bottom: 15px;
+  text-align: center;
+}
+
+.modal-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.modal-button {
+  padding: 10px;
+  text-align: center;
+  cursor: pointer;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f5f5f5;
+}
+
+.modal-button:hover {
+  background-color: #e0e0e0;
+}
+
+.playlist-button {
+  background-color: #4caf50;
+  color: white;
+}
+
+.playlist-button:hover {
+  background-color: #388e3c;
+}
+
+.cancel-button {
+  width: 100%;
+  padding: 8px;
+  background-color: #f1f1f1;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-button:hover {
+  background-color: #e0e0e0;
+}
+
+.download-mode-selector {
+  display: flex;
+  margin-bottom: 4px;
+  gap: 15px;
+  padding: 0;
+}
+
+.download-mode-selector input {
+  margin: 0;
+}
+
+.mode-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.mode-label input {
+  margin-right: 5px;
+}
+
+.mode-label span {
+  font-size: 0.9em;
 }
 </style>
