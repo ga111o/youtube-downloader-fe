@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 // import downloadIcon from "../public/download.svg"; // SVG 파일 임포트
 // import deleteIcon from "../public/delete.svg"; // SVG 파일 임포트
 
@@ -9,6 +9,7 @@ const wsUrl = "ws://localhost:53241/ws";
 // WebSocket connection
 const socket = ref<WebSocket | null>(null);
 const messages = ref<string[]>([]);
+const messagesContainer = ref<HTMLElement | null>(null);
 const newUrl = ref("");
 const selectedFormat = ref("mp3");
 // URL 리스트 관리를 위한 상태 추가 - 썸네일과 제목 정보 추가
@@ -24,6 +25,19 @@ const currentFileMetadata = ref<{
 } | null>(null);
 const isDownloading = ref(false);
 const isProcessingQueue = ref(false);
+
+watch(
+  messages,
+  () => {
+    setTimeout(() => {
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop =
+          messagesContainer.value.scrollHeight;
+      }
+    }, 0);
+  },
+  { deep: true }
+);
 
 // Connect to WebSocket
 const connectWebSocket = () => {
@@ -361,7 +375,7 @@ onBeforeUnmount(() => {
 
     <p v-if="messages.length > 0" class="message-header">logs</p>
 
-    <div v-if="messages.length > 0" class="messages">
+    <div v-if="messages.length > 0" class="messages" ref="messagesContainer">
       <div
         v-for="(message, index) in messages"
         :key="index"
