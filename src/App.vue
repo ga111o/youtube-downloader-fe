@@ -40,6 +40,7 @@ const currentFileMetadata = ref<{
 } | null>(null);
 const isDownloading = ref(false);
 const isProcessingQueue = ref(false);
+const shouldStopProcessing = ref(false); // 다운로드 중단 플래그 추가
 const isShowingPlaylistModal = ref(false);
 const pendingUrl = ref("");
 
@@ -320,22 +321,37 @@ const toggleSelectAll = (select: boolean) => {
   );
 };
 
-// 선택된 URL 처리 시작
+// 선택된 URL 처리 시작 또는 중단
 const startProcessing = () => {
-  if (isDownloading.value || isProcessingQueue.value) return;
+  // 이미 처리 중이면 중단 신호 설정
+  if (isProcessingQueue.value) {
+    shouldStopProcessing.value = true;
+    messages.value.push("현재 항목 다운로드 완료 후 중단합니다.");
+    return;
+  }
 
+  // 다운로드 시작
   const selectedUrls = urlList.value.filter(
     (item: { url: string; selected: boolean }) => item.selected
   );
   if (selectedUrls.length === 0) return;
 
   isProcessingQueue.value = true;
+  shouldStopProcessing.value = false; // 중단 플래그 초기화
   processNextInQueue();
 };
 
 // 큐에서 다음 URL 처리
 const processNextInQueue = () => {
   if (!isProcessingQueue.value) return;
+
+  // 중단 신호가 있고 현재 다운로드 중이 아니면 처리 중단
+  if (shouldStopProcessing.value && !isDownloading.value) {
+    isProcessingQueue.value = false;
+    shouldStopProcessing.value = false;
+    messages.value.push("다운로드가 중단되었습니다.");
+    return;
+  }
 
   // 이미 다운로드 중이면 리턴
   if (isDownloading.value) return;
@@ -348,6 +364,7 @@ const processNextInQueue = () => {
   if (nextItemIndex === -1) {
     // 더 이상 처리할 URL이 없으면 종료
     isProcessingQueue.value = false;
+    shouldStopProcessing.value = false;
     messages.value.push("모든 선택된 URL 처리 완료");
     return;
   }
@@ -526,10 +543,9 @@ onBeforeUnmount(() => {
           </button>
           <button
             @click="startProcessing"
-            :disabled="isDownloading || isProcessingQueue"
-            class="download-button"
+            :class="['download-button', isProcessingQueue ? 'stop-button' : '']"
           >
-            선택한 항목 다운로드
+            {{ isProcessingQueue ? "다운로드 중단" : "선택한 항목 다운로드" }}
           </button>
         </div>
       </div>
@@ -946,5 +962,13 @@ button:disabled {
 
 .mode-label span {
   font-size: 0.9em;
+}
+
+.stop-button {
+  background-color: #f44336;
+}
+
+.stop-button:hover {
+  background-color: #d32f2f;
 }
 </style>
