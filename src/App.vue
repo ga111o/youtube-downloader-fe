@@ -5,7 +5,7 @@ import { ref, onMounted, onBeforeUnmount, watch } from "vue";
 
 // 두 개의 서버 URL 정의
 const LOCAL_SERVER_URL = "ws://localhost:53241/ws";
-const REMOTE_SERVER_URL = "ws://downloader.ga111o.com/ws";
+const REMOTE_SERVER_URL = "ws://223.194.20.119:53241/ws";
 const serverType = ref<"local" | "remote">("remote"); // 기본값은 원격 서버
 const wsUrl = ref(REMOTE_SERVER_URL); // 기본 URL 설정
 
